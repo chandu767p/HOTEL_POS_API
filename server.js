@@ -31,7 +31,7 @@ app.get('/api/health', (req, res) =>
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚀 AJARK POS Server running on http://localhost:${PORT}`);
   console.log(`   Sockets: disabled (print-queue mode)`);
   console.log(`   Environment: ${process.env.NODE_ENV || 'development'}\n`);
