@@ -5,7 +5,10 @@ const Table = require('../models/Table');
 // @access  Private
 exports.getTables = async (req, res, next) => {
   try {
-    const tables = await Table.find().populate('currentOrder');
+    const tables = await Table.find()
+      .populate('currentOrder')
+      .sort({ number: 1 })
+      .collation({ locale: 'en', numericOrdering: true });
     res.json(tables);
   } catch (err) {
     next(err);
