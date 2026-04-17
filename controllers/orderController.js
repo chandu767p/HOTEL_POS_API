@@ -1,12 +1,12 @@
-const Order  = require('../models/Order');
-const Table  = require('../models/Table');
+const Order = require('../models/Order');
+const Table = require('../models/Table');
 const Kitchen = require('../models/Kitchen');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POS PRINT helper — prints a KOT (Kitchen Order Ticket) to the server console
 // ─────────────────────────────────────────────────────────────────────────────
 function posPrint(ticket) {
-  const line  = '─'.repeat(40);
+  const line = '─'.repeat(40);
   const dline = '═'.repeat(40);
 
   console.log(`\n${dline}`);
@@ -34,8 +34,20 @@ exports.getOrders = async (req, res, next) => {
     const filter = {};
     if (req.query.status) filter.status = req.query.status;
 
+    // Add date range filtering
+    if (req.query.startDate && req.query.endDate) {
+      filter.createdAt = {
+        $gte: new Date(req.query.startDate),
+        $lte: new Date(req.query.endDate)
+      };
+    } else if (req.query.startDate) {
+      filter.createdAt = { $gte: new Date(req.query.startDate) };
+    } else if (req.query.endDate) {
+      filter.createdAt = { $lte: new Date(req.query.endDate) };
+    }
+
     const orders = await Order.find(filter)
-      .populate('table',  'number status')
+      .populate('table', 'number status')
       .populate('waiter', 'name email')
       .populate('kitchenOrders.kitchen', 'name type displayColor')
       .sort('-createdAt');
@@ -51,7 +63,7 @@ exports.getOrders = async (req, res, next) => {
 exports.getOrder = async (req, res, next) => {
   try {
     const order = await Order.findById(req.params.id)
-      .populate('table',  'number status')
+      .populate('table', 'number status')
       .populate('waiter', 'name email')
       .populate('items.menuItem', 'name price')
       .populate('kitchenOrders.kitchen', 'name type displayColor');
@@ -75,63 +87,92 @@ exports.createOrder = async (req, res, next) => {
     const table = await Table.findById(tableId);
     if (!table) return res.status(404).json({ success: false, message: 'Table not found' });
 
-    // Snapshot items (name, price from cart)
-    const orderItems = items.map(i => ({
-      menuItem: i.menuItem,
-      name:     i.name     || 'Unknown',
-      price:    Number(i.price)    || 0,
-      quantity: Number(i.quantity) || 1,
-      notes:    i.notes    || '',
-      kitchen:  i.kitchen  || null,
-    }));
+    const MenuItem = require('../models/MenuItem');
 
-    const calculatedTotal = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
-
-    // ── Build kitchenOrders by grouping items by kitchen ──
+    // ── Build kitchenOrders by grouping items (and bundle components) by kitchen ──
     const kitchenMap = {};
-    for (const item of orderItems) {
-      if (item.kitchen) {
-        const key = item.kitchen.toString();
-        if (!kitchenMap[key]) kitchenMap[key] = [];
-        kitchenMap[key].push(item);
+    const processedOrderItems = [];
+
+    for (const item of items) {
+      const dbItem = await MenuItem.findById(item.menuItem).populate('bundleItems.item');
+
+      // Add the master item to the order snapshot
+      processedOrderItems.push({
+        menuItem: item.menuItem,
+        name: item.name || dbItem?.name || 'Unknown',
+        price: Number(item.price) || dbItem?.price || 0,
+        quantity: Number(item.quantity) || 1,
+        notes: item.notes || '',
+        kitchen: item.kitchen || dbItem?.kitchen || null,
+      });
+
+      // Handle kitchen routing
+      if (dbItem?.isBundle && dbItem.bundleItems?.length > 0) {
+        // Expand bundle for kitchen
+        for (const bundleEntry of dbItem.bundleItems) {
+          const component = bundleEntry.item;
+          if (component?.kitchen) {
+            const kId = component.kitchen.toString();
+            if (!kitchenMap[kId]) kitchenMap[kId] = [];
+            kitchenMap[kId].push({
+              name: `${component.name} (from ${dbItem.name})`,
+              quantity: bundleEntry.quantity * (Number(item.quantity) || 1),
+              price: 0, // Components are included in the bundle price
+              notes: item.notes,
+              menuItem: component._id,
+            });
+          }
+        }
+      } else if (item.kitchen || dbItem?.kitchen) {
+        const kId = (item.kitchen || dbItem.kitchen).toString();
+        if (!kitchenMap[kId]) kitchenMap[kId] = [];
+        kitchenMap[kId].push({
+          menuItem: item.menuItem,
+          name: item.name || dbItem?.name || 'Unknown',
+          quantity: Number(item.quantity) || 1,
+          price: Number(item.price) || dbItem?.price || 0,
+          notes: item.notes || '',
+        });
       }
     }
 
+    const calculatedTotal = processedOrderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+
     const kitchenOrders = Object.entries(kitchenMap).map(([kitchenId, kitItems]) => ({
       kitchen: kitchenId,
-      items:   kitItems,
-      status:  'preparing', // auto-advance to preparing after print
+      items: kitItems,
+      status: 'preparing',
     }));
 
-    // Create order with status 'preparing' (kitchen has been notified via print)
+    // Create order with status 'preparing'
     const order = await Order.create({
-      table:      tableId,
-      waiter:     req.user.id,
-      items:      orderItems,
+      table: tableId,
+      waiter: req.user.id,
+      items: processedOrderItems,
       kitchenOrders,
       totalAmount: calculatedTotal,
-      status:     kitchenOrders.length > 0 ? 'preparing' : 'pending',
+      status: kitchenOrders.length > 0 ? 'preparing' : 'pending',
     });
 
     // Update table
-    table.status       = 'occupied';
+    table.status = 'occupied';
     table.currentOrder = order._id;
     await table.save();
 
     const populated = await Order.findById(order._id)
-      .populate('table',  'number status')
+      .populate('table', 'number status')
       .populate('waiter', 'name')
       .populate('kitchenOrders.kitchen', 'name type displayColor');
 
     // ── POS PRINT: one ticket per kitchen ──
     for (const ko of populated.kitchenOrders) {
       posPrint({
-        orderId:     order._id,
+        orderId: order._id,
         tableNumber: populated.table?.number,
-        waiterName:  populated.waiter?.name || req.user.name || 'Waiter',
+        waiterName: populated.waiter?.name || req.user.name || 'Waiter',
         kitchenName: ko.kitchen?.name || 'Kitchen',
-        wave:        1,
-        items:       ko.items,
+        wave: 1,
+        items: ko.items,
       });
     }
 
@@ -156,11 +197,11 @@ exports.updateOrder = async (req, res, next) => {
 
     const orderItems = items.map(i => ({
       menuItem: i.menuItem,
-      name:     i.name     || 'Unknown',
-      price:    Number(i.price)    || 0,
+      name: i.name || 'Unknown',
+      price: Number(i.price) || 0,
       quantity: Number(i.quantity) || 1,
-      notes:    i.notes    || '',
-      kitchen:  i.kitchen  || null,
+      notes: i.notes || '',
+      kitchen: i.kitchen || null,
     }));
 
     // ── Snapshot existing items: menuItemId → { quantity, kitchenId } ──
@@ -169,18 +210,18 @@ exports.updateOrder = async (req, res, next) => {
       const key = (item.menuItem?._id || item.menuItem).toString();
       existingItemsMap[key] = {
         quantity: item.quantity,
-        kitchen:  item.kitchen ? item.kitchen.toString() : null,
+        kitchen: item.kitchen ? item.kitchen.toString() : null,
       };
     }
 
     // ── Determine the next wave number ──
-    const maxWave  = order.kitchenOrders.reduce((max, ko) => Math.max(max, ko.wave || 1), 1);
+    const maxWave = order.kitchenOrders.reduce((max, ko) => Math.max(max, ko.wave || 1), 1);
     const nextWave = maxWave + 1;
 
     // ── Compute delta: what's truly new or increased ──
     const additionsByKitchen = {};
     for (const item of orderItems) {
-      const key      = (item.menuItem?._id || item.menuItem).toString();
+      const key = (item.menuItem?._id || item.menuItem).toString();
       const existing = existingItemsMap[key];
       const kitchenId = item.kitchen ? item.kitchen.toString() : null;
 
@@ -201,18 +242,18 @@ exports.updateOrder = async (req, res, next) => {
     // ── Append new wave kitchenOrders for each kitchen with additions ──
     for (const [kitchenId, addItems] of Object.entries(additionsByKitchen)) {
       order.kitchenOrders.push({
-        kitchen:    kitchenId,
-        items:      addItems,
-        status:     'preparing', // auto-preparing after print
-        wave:       nextWave,
+        kitchen: kitchenId,
+        items: addItems,
+        status: 'preparing', // auto-preparing after print
+        wave: nextWave,
         isAddition: true,
-        createdAt:  new Date(),
-        updatedAt:  new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
       });
     }
 
     // Update the master items list and total
-    order.items       = orderItems;
+    order.items = orderItems;
     order.totalAmount = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
     // Keep order status as preparing
@@ -223,7 +264,7 @@ exports.updateOrder = async (req, res, next) => {
     await order.save();
 
     const populated = await Order.findById(order._id)
-      .populate('table',  'number status')
+      .populate('table', 'number status')
       .populate('waiter', 'name')
       .populate('kitchenOrders.kitchen', 'name type displayColor');
 
@@ -233,12 +274,12 @@ exports.updateOrder = async (req, res, next) => {
         ko => ko.kitchen?._id?.toString() === kitchenId || ko.kitchen?.toString() === kitchenId
       );
       posPrint({
-        orderId:     order._id,
+        orderId: order._id,
         tableNumber: populated.table?.number,
-        waiterName:  populated.waiter?.name || 'Waiter',
+        waiterName: populated.waiter?.name || 'Waiter',
         kitchenName: koKitchen?.kitchen?.name || kitchenId,
-        wave:        nextWave,
-        items:       addItems,
+        wave: nextWave,
+        items: addItems,
       });
     }
 
@@ -258,10 +299,10 @@ exports.updateKitchenOrderStatus = async (req, res, next) => {
     const { status } = req.body;
 
     const ALLOWED_TRANSITIONS = {
-      pending:   'preparing',
+      pending: 'preparing',
       preparing: 'ready',
-      ready:     'completed',
-      completed:  null,
+      ready: 'completed',
+      completed: null,
     };
 
     if (!Object.keys(ALLOWED_TRANSITIONS).includes(status)) {
@@ -282,13 +323,13 @@ exports.updateKitchenOrderStatus = async (req, res, next) => {
       });
     }
 
-    ko.status    = status;
+    ko.status = status;
     ko.updatedAt = new Date();
     order.syncStatus();
     await order.save();
 
     const populated = await Order.findById(orderId)
-      .populate('table',  'number status')
+      .populate('table', 'number status')
       .populate('waiter', 'name')
       .populate('kitchenOrders.kitchen', 'name type displayColor');
 
@@ -312,7 +353,7 @@ exports.updateOrderStatus = async (req, res, next) => {
     }
 
     const order = await Order.findById(req.params.id)
-      .populate('table',  'number status')
+      .populate('table', 'number status')
       .populate('waiter', 'name');
 
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
@@ -325,7 +366,7 @@ exports.updateOrderStatus = async (req, res, next) => {
     if (status === 'cancelled' && order.table) {
       const table = await Table.findById(order.table._id || order.table);
       if (table) {
-        table.status       = 'available';
+        table.status = 'available';
         table.currentOrder = null;
         await table.save();
       }
@@ -353,27 +394,63 @@ exports.payOrder = async (req, res, next) => {
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
     if (order.status === 'paid') return res.status(400).json({ success: false, message: 'Order is already paid' });
 
-    const subtotal   = order.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+    const subtotal = order.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
     const discountAmt = (subtotal * Number(discount)) / 100;
-    const taxAmt     = ((subtotal - discountAmt) * Number(tax)) / 100;
+    const taxAmt = ((subtotal - discountAmt) * Number(tax)) / 100;
     const finalTotal = subtotal - discountAmt + taxAmt;
 
-    order.status        = 'paid';
+    order.status = 'paid';
     order.paymentMethod = paymentMethod;
-    order.totalAmount   = parseFloat(finalTotal.toFixed(2));
+    order.totalAmount = parseFloat(finalTotal.toFixed(2));
     await order.save();
 
     // Free up the table
     if (order.table) {
       const table = await Table.findById(order.table._id || order.table);
       if (table) {
-        table.status       = 'available';
+        table.status = 'available';
         table.currentOrder = null;
         await table.save();
       }
     }
 
     res.json({ success: true, order });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Get top selling items (best sellers)
+// @route   GET /api/orders/best-sellers
+// @access  Private
+exports.getBestSellers = async (req, res, next) => {
+  try {
+    const { limit = 10, startDate, endDate } = req.query;
+    const filter = { status: 'paid' }; // Only count paid orders
+
+    if (startDate && endDate) {
+      filter.createdAt = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    }
+
+    const bestSellers = await Order.aggregate([
+      { $match: filter },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$items.menuItem',
+          name: { $first: '$items.name' },
+          totalSold: { $sum: '$items.quantity' },
+          revenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } }
+        }
+      },
+      { $sort: { totalSold: -1 } },
+      { $limit: parseInt(limit) }
+    ]);
+
+    res.json(bestSellers);
   } catch (err) {
     next(err);
   }

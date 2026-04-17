@@ -7,7 +7,10 @@ const MenuItem = require('../models/MenuItem');
 exports.getMenu = async (req, res, next) => {
   try {
     const categories = await Category.find().sort('name');
-    const items = await MenuItem.find().populate('category', 'name').sort('name');
+    const items = await MenuItem.find()
+      .populate('category', 'name')
+      .populate('bundleItems.item')
+      .sort('name');
     res.json({ categories, items });
   } catch (err) {
     next(err);
@@ -70,13 +73,25 @@ exports.deleteCategory = async (req, res, next) => {
 // @access  Private/Admin
 exports.createMenuItem = async (req, res, next) => {
   try {
-    const { name, price, description, category, isAvailable } = req.body;
+    const { name, price, description, category, kitchen, isAvailable, isBundle, bundleItems, dietary } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ success: false, message: 'Item name is required' });
     if (!price || isNaN(price)) return res.status(400).json({ success: false, message: 'Valid price is required' });
     if (!category) return res.status(400).json({ success: false, message: 'Category is required' });
 
-    const item = await MenuItem.create({ name: name.trim(), price: Number(price), description, category, isAvailable: isAvailable !== false });
-    const populated = await item.populate('category', 'name');
+    const item = await MenuItem.create({ 
+      name: name.trim(), 
+      price: Number(price), 
+      description, 
+      category, 
+      kitchen: kitchen === '' ? null : kitchen,
+      isAvailable: isAvailable !== false,
+      isBundle: isBundle === true,
+      bundleItems: bundleItems || [],
+      dietary: dietary || 'none'
+    });
+    const populated = await MenuItem.findById(item._id)
+      .populate('category', 'name')
+      .populate('bundleItems.item');
     res.status(201).json(populated);
   } catch (err) {
     next(err);
@@ -88,15 +103,21 @@ exports.createMenuItem = async (req, res, next) => {
 // @access  Private/Admin
 exports.updateMenuItem = async (req, res, next) => {
   try {
-    const { name, price, description, category, isAvailable } = req.body;
+    const { name, price, description, category, kitchen, isAvailable, isBundle, bundleItems, dietary } = req.body;
     const updates = {};
     if (name !== undefined) updates.name = name.trim();
     if (price !== undefined) updates.price = Number(price);
     if (description !== undefined) updates.description = description;
-    if (category !== undefined) updates.category = category;
+    if (category !== undefined && category !== '') updates.category = category;
+    if (kitchen !== undefined) updates.kitchen = kitchen === '' ? null : kitchen;
     if (isAvailable !== undefined) updates.isAvailable = isAvailable;
+    if (isBundle !== undefined) updates.isBundle = isBundle;
+    if (bundleItems !== undefined) updates.bundleItems = bundleItems;
+    if (dietary !== undefined) updates.dietary = dietary;
 
-    const item = await MenuItem.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true }).populate('category', 'name');
+    const item = await MenuItem.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true })
+      .populate('category', 'name')
+      .populate('bundleItems.item');
     if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
     res.json(item);
   } catch (err) {

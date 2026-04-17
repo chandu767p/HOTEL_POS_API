@@ -8,12 +8,14 @@ const {
   updateOrderStatus,
   updateKitchenOrderStatus,
   payOrder,
+  getBestSellers,
 } = require('../controllers/orderController');
 const { protect } = require('../middleware/auth');
 
 router.use(protect);
 
 router.get('/', getOrders);
+router.get('/best-sellers', getBestSellers);
 router.get('/:id', getOrder);
 router.post('/', createOrder);
 router.put('/:id', updateOrder);

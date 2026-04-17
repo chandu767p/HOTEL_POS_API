@@ -35,6 +35,21 @@ const menuItemSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    isBundle: {
+      type: Boolean,
+      default: false,
+    },
+    bundleItems: [
+      {
+        item: { type: mongoose.Schema.Types.ObjectId, ref: 'MenuItem' },
+        quantity: { type: Number, default: 1 },
+      },
+    ],
+    dietary: {
+      type: String,
+      enum: ['veg', 'non-veg', 'egg', 'none'],
+      default: 'none',
+    },
   },
   { timestamps: true }
 );
