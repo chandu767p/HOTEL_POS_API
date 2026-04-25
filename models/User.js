@@ -24,9 +24,9 @@ const userSchema = new mongoose.Schema(
       select: false,
     },
     role: {
-      type: String,
-      enum: ['admin', 'manager', 'waiter', 'chef'],
-      default: 'waiter',
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Role',
+      required: true,
     },
     active: {
       type: Boolean,

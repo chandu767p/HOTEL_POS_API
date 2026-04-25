@@ -6,6 +6,7 @@ const Kitchen = require('../models/Kitchen');
 const MenuItem = require('../models/MenuItem');
 const Table = require('../models/Table');
 const User = require('../models/User');
+const Role = require('../models/Role');
 
 dotenv.config();
 
@@ -21,14 +22,49 @@ const seedDB = async () => {
       MenuItem.deleteMany(),
       Table.deleteMany(),
       User.deleteMany(),
+      Role.deleteMany(),
     ]);
+
+    // ── 0. Roles ──
+    const roles = await Role.create([
+      { 
+        name: 'admin', 
+        description: 'Super administrator with full access', 
+        permissions: ['manage_orders', 'manage_menu', 'manage_tables', 'manage_staff', 'view_reports', 'manage_kitchen', 'manage_roles'], 
+        isDefault: true 
+      },
+      { 
+        name: 'manager', 
+        description: 'Store manager', 
+        permissions: ['manage_orders', 'manage_menu', 'manage_tables', 'view_reports', 'manage_kitchen'], 
+        isDefault: true 
+      },
+      { 
+        name: 'chef', 
+        description: 'Kitchen head', 
+        permissions: ['manage_orders', 'manage_kitchen'], 
+        isDefault: true 
+      },
+      { 
+        name: 'waiter', 
+        description: 'Floor staff', 
+        permissions: ['manage_orders'], 
+        isDefault: true 
+      },
+    ]);
+    console.log(`✅ ${roles.length} roles created`);
+
+    const adminRole = roles.find(r => r.name === 'admin')._id;
+    const managerRole = roles.find(r => r.name === 'manager')._id;
+    const chefRole = roles.find(r => r.name === 'chef')._id;
+    const waiterRole = roles.find(r => r.name === 'waiter')._id;
 
     // ── 1. Users ──
     const users = await User.create([
-      { name: 'Admin AJARK', email: 'admin@ajark.com', password: 'password123', role: 'admin' },
-      { name: 'John Waiter', email: 'waiter@ajark.com', password: 'password123', role: 'waiter' },
-      { name: 'Maria Chef', email: 'chef@ajark.com', password: 'password123', role: 'chef' },
-      { name: 'Sam Manager', email: 'manager@ajark.com', password: 'password123', role: 'manager' },
+      { name: 'Admin AJARK', email: 'admin@ajark.com', password: 'password123', role: adminRole },
+      { name: 'John Waiter', email: 'waiter@ajark.com', password: 'password123', role: waiterRole },
+      { name: 'Maria Chef', email: 'chef@ajark.com', password: 'password123', role: chefRole },
+      { name: 'Sam Manager', email: 'manager@ajark.com', password: 'password123', role: managerRole },
     ]);
     console.log(`✅ ${users.length} users created`);
 

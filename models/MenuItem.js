@@ -50,6 +50,12 @@ const menuItemSchema = new mongoose.Schema(
       enum: ['veg', 'non-veg', 'egg', 'none'],
       default: 'none',
     },
+    ingredients: [
+      {
+        inventoryItem: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryItem' },
+        quantity: { type: Number, default: 1 },
+      },
+    ],
   },
   { timestamps: true }
 );

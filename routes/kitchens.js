@@ -11,11 +11,13 @@ const {
 } = require('../controllers/kitchenController');
 const { protect, authorize } = require('../middleware/auth');
 
-router.use(protect);
-
-// Kitchen CRUD
+// Public KDS routes
 router.get('/', getKitchens);
 router.get('/:id', getKitchen);
+
+router.use(protect);
+
+// Kitchen CRUD (Protected)
 router.post('/', authorize('admin', 'manager'), createKitchen);
 router.put('/:id', authorize('admin', 'manager'), updateKitchen);
 router.delete('/:id', authorize('admin', 'manager'), deleteKitchen);
