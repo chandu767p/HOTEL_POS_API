@@ -13,7 +13,7 @@ const sendToken = (user, statusCode, res) => {
       id: user._id,
       name: user.name,
       email: user.email,
-      role: user.role,
+      role: user.role, // This should be an object if populated, or ID
       active: user.active,
     },
   });
@@ -32,7 +32,8 @@ exports.register = async (req, res, next) => {
     }
 
     const user = await User.create({ name, email, password, role });
-    sendToken(user, 201, res);
+    const populatedUser = await User.findById(user._id).populate('role');
+    sendToken(populatedUser, 201, res);
   } catch (err) {
     next(err);
   }
@@ -61,7 +62,8 @@ exports.login = async (req, res, next) => {
     user.lastLogin = new Date();
     await user.save({ validateBeforeSave: false });
 
-    sendToken(user, 200, res);
+    const populatedUser = await User.findById(user._id).populate('role');
+    sendToken(populatedUser, 200, res);
   } catch (err) {
     next(err);
   }
@@ -72,7 +74,7 @@ exports.login = async (req, res, next) => {
 // @access  Private
 exports.getMe = async (req, res, next) => {
   try {
-    const user = await User.findById(req.user.id);
+    const user = await User.findById(req.user.id).populate('role');
     res.json({ success: true, user });
   } catch (err) {
     next(err);

@@ -49,7 +49,7 @@ const orderSchema = new mongoose.Schema(
     table: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Table',
-      required: true,
+      required: false,
     },
     waiter: {
       type: mongoose.Schema.Types.ObjectId,
@@ -72,6 +72,18 @@ const orderSchema = new mongoose.Schema(
       type: String,
       enum: ['cash', 'card', 'online', 'none'],
       default: 'none',
+    },
+    razorpayOrderId: { type: String },
+    razorpayPaymentId: { type: String },
+    orderType: {
+      type: String,
+      enum: ['DINE_IN', 'TAKEAWAY', 'ONLINE'],
+      default: 'DINE_IN',
+    },
+    source: {
+      type: String,
+      enum: ['SWIGGY', 'ZOMATO', 'DIRECT'],
+      default: 'DIRECT',
     },
   },
   { timestamps: true }

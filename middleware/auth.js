@@ -14,7 +14,7 @@ const protect = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id);
+    const user = await User.findById(decoded.id).populate('role');
 
     if (!user) {
       return res.status(401).json({ success: false, message: 'User not found' });
@@ -33,10 +33,11 @@ const protect = async (req, res, next) => {
 
 const authorize = (...roles) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
+    const roleName = req.user.role?.name || req.user.role;
+    if (roleName !== 'admin' && !roles.includes(roleName)) {
       return res.status(403).json({
         success: false,
-        message: `Role '${req.user.role}' is not authorized for this action`,
+        message: `Role '${roleName}' is not authorized for this action`,
       });
     }
     next();
